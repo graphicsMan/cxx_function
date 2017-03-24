@@ -1,3 +1,5 @@
+#include <iostream>
+
 #include "cxx_function.hpp"
 
 #include <cassert>
@@ -16,7 +18,11 @@ struct pool_alloc : std::allocator< t > {
     pool_alloc( pool_alloc< u > const & o )
         : id( o.id ) {}
 
-    pool_alloc( int in_id )
+    pool_alloc( int in_id
+#if _MSC_VER && _MSC_VER < 1910
+                            = 0
+#endif
+                                )
         : id( in_id ) {}
 
     t * allocate( std::size_t n ) {
@@ -56,7 +62,7 @@ struct stateful_op {
         : state( std::move( s ) ) {}
 
     void operator () () const
-        { /* std::cout << "op says " << state << " from pool id " << state.get_allocator().id << '\n'; */ }
+        {  std::cout << "op says " << state << " from pool id " << state.get_allocator().id << '\n'; }
 };
 
 struct listful_op {
@@ -70,7 +76,7 @@ struct listful_op {
         : state( { std::move( s ) }, a ) {}
 
     void operator () () const
-        { /* std::cout << "op says " << state << " from pool id " << state.get_allocator().id << '\n'; */ }
+        { std::cout << "op says " << state << " from pool id " << state.get_allocator().id << '\n'; }
 };
 static_assert ( sizeof (std::forward_list< int >) < sizeof(void *[3]), "list is bigger than anticipated." );
 static_assert ( sizeof (listful_op) <= sizeof (void *[3]), "Small-size container test defeated." );
@@ -83,6 +89,7 @@ namespace std {
 using namespace cxx_function;
 
 int main() {
+    std::cout << "starting\n";
     stateful_op op( { "hello from a very long string", pool_alloc< char >{ 0 } } );
     
     typedef function_container< std::scoped_allocator_adaptor< pool_alloc<char> >, void() > fct;
@@ -100,6 +107,9 @@ int main() {
     assert ( pool[ 0 ] == op.state.capacity() + 1 );
     assert ( pool[ 1 ] == op.state.capacity() * 2 + 2 + sizeof (stateful_op) * 2 );
     assert ( pool[ 2 ] == op.state.capacity() + 1 + sizeof (stateful_op) );
+    
+    std::cout << "halfway\n";
+    
     {
         std::map< int, function< void() >, std::less< int >,
             typename fct::allocator_type::template rebind< std::pair< int const, function< void() > > >::other > m( pool_alloc< char >{ 3 } );
@@ -116,7 +126,13 @@ int main() {
     assert ( fc2.target< stateful_op >() );
     fc2 = listful_op( fc2.target< stateful_op >()->state, pool_alloc< char >{ 2 } );
     fc1 = fc2;
+    std::cout << "finishing\n";
+#if ! _MSC_VER || _MSC_VER >= 1910
     fv = nullptr;
+#else
+    fv.operator = < std::nullptr_t >( nullptr );
+#endif
     
     assert ( pool[ 1 ] == pool[ 2 ] );
+    std::cout << "success\n";
 }
